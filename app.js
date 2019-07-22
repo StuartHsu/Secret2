@@ -7,6 +7,8 @@ const mongoose = require("mongoose");
 const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const findOrCreate = require("mongoose-findorcreate");
 
 const app = express();
 
@@ -34,24 +36,68 @@ mongoose.set("useCreateIndex", true);
 
 const userSchema = new mongoose.Schema({
   email: String,
-  password: String
+  password: String,
+  googleId: String
 });
 
 // 2. set passport-local-mongoose
 // use to hash & salt password then save user to DB
 userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 const User = new mongoose.model("User", userSchema);
 
 // 2. set passport-local-mongoose
 passport.use(User.createStrategy());
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
+});
+
+passport.deserializeUser(function(id, done) {
+  User.findById(id, function(err, user) {
+    done(err, user);
+  });
+});
+
+// 3. 通過認證後給予 accessToken 讓你可以拿到使用者 profile 並存入 DB
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    console.log(profile);
+    User.findOrCreate({
+      googleId: profile.id
+    }, function(err, user) {
+      return cb(err, user);
+    });
+  }
+));
 
 app.get("/", function(req, res) {
   res.render("home");
 });
+
+// 1. 跟google要資料
+app.get("/auth/google",
+// 跟"google" server 要 "profile" 資料 -> 要到資料後 google會自動導到你設定的路徑：/auth/google/secrets
+  passport.authenticate("google", {
+    scope: ["profile"]
+  })
+);
+
+// 2. 要到資料後導特定頁面
+app.get("/auth/google/secrets",
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  function(req, res) {
+    // 2. 過認證後，跑去 3. 給資料
+    // Successful authentication, redirect home.
+    // 4. 導到最終頁面
+    res.redirect("/secrets");
+  });
 
 app.get("/login", function(req, res) {
   res.render("login");
@@ -76,7 +122,9 @@ app.get("/logout", function(req, res) {
 
 app.post("/register", function(req, res) {
   // https://www.npmjs.com/package/passport-local-mongoose
-  User.register({username: req.body.username}, req.body.password, function(err, user) {
+  User.register({
+    username: req.body.username
+  }, req.body.password, function(err, user) {
     if (err) {
       console.log(err);
       res.redirect("/register");
