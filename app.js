@@ -37,7 +37,8 @@ mongoose.set("useCreateIndex", true);
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
-  googleId: String
+  googleId: String,
+  secret: String
 });
 
 // 2. set passport-local-mongoose
@@ -69,6 +70,7 @@ passport.use(new GoogleStrategy({
   },
   function(accessToken, refreshToken, profile, cb) {
     console.log(profile);
+
     User.findOrCreate({
       googleId: profile.id
     }, function(err, user) {
@@ -83,7 +85,7 @@ app.get("/", function(req, res) {
 
 // 1. 跟google要資料
 app.get("/auth/google",
-// 跟"google" server 要 "profile" 資料 -> 要到資料後 google會自動導到你設定的路徑：/auth/google/secrets
+  // 跟"google" server 要 "profile" 資料 -> 要到資料後 google會自動導到你設定的路徑：/auth/google/secrets
   passport.authenticate("google", {
     scope: ["profile"]
   })
@@ -91,7 +93,9 @@ app.get("/auth/google",
 
 // 2. 要到資料後導特定頁面
 app.get("/auth/google/secrets",
-  passport.authenticate("google", { failureRedirect: "/login" }),
+  passport.authenticate("google", {
+    failureRedirect: "/login"
+  }),
   function(req, res) {
     // 2. 過認證後，跑去 3. 給資料
     // Successful authentication, redirect home.
@@ -108,11 +112,46 @@ app.get("/register", function(req, res) {
 });
 
 app.get("/secrets", function(req, res) {
+  User.find({
+    "secret": {
+      $ne: null
+    }
+  }, function(err, foundUsers) {
+    if (err) {
+      console.log(err);
+    } else {
+      if (foundUsers) {
+        res.render("secrets", {
+          usersWithSecrets: foundUsers
+        });
+      }
+    }
+  });
+});
+
+app.get("/submit", function(req, res) {
   if (req.isAuthenticated()) {
-    res.render("secrets");
+    res.render("submit");
   } else {
     res.redirect("/login");
   }
+});
+
+app.post("/submit", function(req, res) {
+  const submittedSecret = req.body.secret;
+
+  User.findById(req.user.id, function(err, foundUser) {
+    if (err) {
+      console.log(err);
+    } else {
+      if (foundUser) {
+        foundUser.secret = submittedSecret;
+        foundUser.save(function() {
+          res.redirect("/secrets");
+        });
+      }
+    }
+  });
 });
 
 app.get("/logout", function(req, res) {
